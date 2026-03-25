@@ -1,0 +1,34 @@
+name: "Multi-agent research flow"
+description: "Tests a research pipeline with researcher and synthesizer agents"
+agents:
+  - role: researcher
+    model: claude-sonnet-4-6
+  - role: synthesizer
+    model: claude-sonnet-4-6
+  - role: fact-checker
+    model: claude-haiku-4-5
+
+scenario:
+  - user: "Research the current state of WebAssembly adoption"
+
+  - assert:
+      tool_called: web_search
+      response_contains: "WebAssembly"
+
+  - checkpoint: "research-complete"
+
+  - user: "Synthesize the findings into a brief report"
+
+  - assert:
+      response_contains: "adoption"
+      cost_under: 0.50
+
+  - user: "Fact-check the key claims"
+
+  - assert:
+      response_contains: "verified"
+      tokens_under: 50000
+
+settings:
+  timeout: 120000
+  parallel: false

@@ -1,0 +1,18 @@
+name: "Code review flow"
+description: "Tests that the agent performs a thorough code review"
+agents:
+  - role: code-reviewer
+    model: claude-sonnet-4-6
+
+scenario:
+  - user: "Review the changes in auth.ts for security issues"
+  - assert:
+      tool_called: read_file
+      response_contains: "security"
+
+  - assert:
+      cost_under: 0.10
+      duration_under: 30000
+
+settings:
+  timeout: 60000

@@ -1,0 +1,32 @@
+name: "Customer refund flow"
+description: "Tests that the agent correctly handles a refund request"
+agents:
+  - role: support-agent
+    model: claude-sonnet-4-6
+
+scenario:
+  - user: "I want a refund for order #12345"
+  - assert:
+      tool_called: lookup_order
+      tool_args:
+        order_id: "12345"
+
+  - mock_tool_response:
+      lookup_order:
+        status: delivered
+        amount: 49.99
+        date: "2026-03-20"
+
+  - assert:
+      response_contains: "refund"
+      cost_under: 0.05
+
+  - checkpoint: "refund-initiated"
+
+  - assert:
+      tool_called: process_refund
+      memory_updated: true
+      memory_contains: "refund"
+
+settings:
+  timeout: 30000

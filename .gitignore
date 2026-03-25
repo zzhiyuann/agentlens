@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.db
+*.db-wal
+*.db-shm
+.agentlens/
+.DS_Store
+*.tsbuildinfo
+coverage/
+
+.agent-memory
+.agent-memory-index.md
+.claude/
+HANDOFF_TEMPLATE.md
+HANDOFF.md
