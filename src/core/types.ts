@@ -134,6 +134,21 @@ export interface TestSettings {
   timeout?: number;
   retries?: number;
   parallel?: boolean;
+  session?: string;  // Replay against this specific session ID
+}
+
+export interface TestContext {
+  sessionId?: string;
+  spans: Span[];
+  currentSpanIndex: number;
+  lastResponse: string;
+  toolsCalled: string[];
+  toolArgs: Record<string, unknown>[];
+  totalCost: number;
+  totalTokens: number;
+  totalDuration: number;
+  memoryBefore?: MemorySnapshot;
+  memoryAfter?: MemorySnapshot;
 }
 
 export interface TestResult {

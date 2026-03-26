@@ -2,9 +2,10 @@ import chalk from 'chalk';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
-import { TestScenario, AssertionBlock, AssertionResult, TestResult } from '../core/types';
+import { TestScenario, AssertionBlock, AssertionResult, TestResult, TestContext, Span } from '../core/types';
 import { heading, dim, bold, green, red, yellow, padRight } from '../utils/format';
 import { formatCost } from '../core/cost';
+import { getSession, getSpansForSession, listSessions } from '../core/storage';
 
 export async function testRunCommand(scenarioPath: string, options: { parallel?: boolean }): Promise<void> {
   const resolvedPath = scenarioPath.replace(/^~/, process.env.HOME || '');
@@ -59,6 +60,75 @@ export async function testRunCommand(scenarioPath: string, options: { parallel?:
   process.exit(totalFailed > 0 ? 1 : 0);
 }
 
+function resolveSession(scenario: TestScenario): { sessionId: string; spans: Span[] } | null {
+  // 1. Explicit session ID in settings
+  if (scenario.settings?.session) {
+    const session = getSession(scenario.settings.session);
+    if (session) {
+      return { sessionId: session.id, spans: session.spans };
+    }
+    // Session ID specified but not found — try as a label
+    const byLabel = findSessionByLabel(scenario.settings.session);
+    if (byLabel) return byLabel;
+    return null;
+  }
+
+  // 2. Auto-match by scenario name as label
+  return findSessionByLabel(scenario.name);
+}
+
+function findSessionByLabel(label: string): { sessionId: string; spans: Span[] } | null {
+  const { sessions } = listSessions({ label, limit: 1 });
+  if (sessions.length > 0) {
+    const session = sessions[0];
+    const spans = getSpansForSession(session.id);
+    return { sessionId: session.id, spans };
+  }
+  return null;
+}
+
+function buildInitialContext(sessionId: string, spans: Span[]): TestContext {
+  const toolSpans = spans.filter(s => s.type === 'tool' && s.tool);
+  const llmSpans = spans.filter(s => s.type === 'llm' && s.llm);
+
+  const totalCost = llmSpans.reduce((sum, s) => sum + (s.llm?.cost ?? 0), 0);
+  const totalTokens = llmSpans.reduce((sum, s) => sum + (s.llm?.inputTokens ?? 0) + (s.llm?.outputTokens ?? 0), 0);
+  const totalDuration = spans.reduce((sum, s) => sum + s.duration, 0);
+
+  return {
+    sessionId,
+    spans,
+    currentSpanIndex: 0,
+    lastResponse: '',
+    toolsCalled: toolSpans.map(s => s.tool!.name),
+    toolArgs: toolSpans.map(s => s.tool!.arguments as Record<string, unknown>),
+    totalCost,
+    totalTokens,
+    totalDuration,
+  };
+}
+
+function advanceContextToNextLLMSpan(context: TestContext): void {
+  // Find the next LLM span from the current position
+  for (let i = context.currentSpanIndex; i < context.spans.length; i++) {
+    const span = context.spans[i];
+    if (span.type === 'llm' && span.llm) {
+      context.lastResponse = span.llm.response;
+      context.currentSpanIndex = i + 1;
+
+      // Accumulate tool calls from spans between the previous position and this LLM span
+      for (let j = context.currentSpanIndex === 1 ? 0 : context.currentSpanIndex - 1; j < i; j++) {
+        const toolSpan = context.spans[j];
+        if (toolSpan.type === 'tool' && toolSpan.tool) {
+          // These are already in the initial context, but we track the index
+        }
+      }
+      return;
+    }
+  }
+  // No more LLM spans — leave context unchanged
+}
+
 async function runScenario(filePath: string): Promise<TestResult> {
   const filename = path.basename(filePath);
   let scenario: TestScenario;
@@ -80,32 +150,55 @@ async function runScenario(filePath: string): Promise<TestResult> {
   console.log(` ${heading('Running:')} ${filename}`);
   console.log('');
 
+  // Attempt to resolve a recorded session for replay
+  let context: TestContext | null = null;
+  const resolved = resolveSession(scenario);
+
+  if (resolved) {
+    context = buildInitialContext(resolved.sessionId, resolved.spans);
+    console.log(`   ${dim(`Replaying against session: ${resolved.sessionId} (${resolved.spans.length} spans)`)}`);
+  } else {
+    const reason = scenario.settings?.session
+      ? `Specified session "${scenario.settings.session}" not found`
+      : 'No matching recorded session found';
+    console.log(`   ${dim(`Dry-run mode: ${reason}`)}`);
+  }
+  console.log('');
+
   const assertions: AssertionResult[] = [];
   const startTime = Date.now();
   let stepNum = 0;
-  let totalSteps = scenario.scenario.filter(s => 'user' in s || 'assert' in s).length;
+  const totalSteps = scenario.scenario.filter(s => 'user' in s || 'assert' in s).length;
   let hasFailed = false;
 
   for (const step of scenario.scenario) {
     if ('user' in step) {
       stepNum++;
       console.log(`   ${dim(`Step ${stepNum}/${totalSteps}`)}  User message: "${truncate(step.user, 50)}"`);
+
+      // In replay mode, advance context to the next LLM span
+      if (context) {
+        advanceContextToNextLLMSpan(context);
+      }
     }
 
     if ('assert' in step) {
       const assertBlock = step.assert;
-      const results = evaluateAssertions(assertBlock, hasFailed);
+      const results = evaluateAssertions(assertBlock, context, hasFailed);
       for (const result of results) {
-        const dots = '.'.repeat(Math.max(1, 50 - result.name.length));
+        const dotsStr = '.'.repeat(Math.max(1, 50 - result.name.length));
         const statusStr = result.status === 'pass' ? green('PASS') :
           result.status === 'fail' ? red('FAIL') : yellow('SKIP');
-        console.log(`    Assert ${result.name} ${dim(dots)} ${statusStr}`);
+        console.log(`    Assert ${result.name} ${dim(dotsStr)} ${statusStr}`);
 
         if (result.status === 'fail') {
           hasFailed = true;
           if (result.expected) console.log(red(`      Expected: ${result.expected}`));
           if (result.actual) console.log(red(`      Actual: ${result.actual}`));
           if (result.message) console.log(dim(`      ${result.message}`));
+        }
+        if (result.status === 'skip' && result.message) {
+          console.log(dim(`      ${result.message}`));
         }
       }
       assertions.push(...results);
@@ -126,6 +219,7 @@ async function runScenario(filePath: string): Promise<TestResult> {
   const failed = assertions.filter(a => a.status === 'fail').length;
   const status = failed > 0 ? 'fail' : 'pass';
   const statusStr = status === 'pass' ? green('PASS') : red('FAIL');
+  const cost = context?.totalCost ?? 0;
 
   console.log(`\n ${statusStr}  ${filename} (${passed}/${assertions.length} assertions, ${(duration / 1000).toFixed(1)}s)\n`);
 
@@ -134,75 +228,226 @@ async function runScenario(filePath: string): Promise<TestResult> {
     status,
     assertions,
     duration,
-    cost: 0,
+    cost,
   };
 }
 
-function evaluateAssertions(block: AssertionBlock, skipAll: boolean): AssertionResult[] {
+function deepPartialMatch(actual: unknown, expected: unknown): boolean {
+  if (expected === undefined || expected === null) return true;
+  if (actual === undefined || actual === null) return false;
+
+  if (typeof expected !== 'object') {
+    return String(actual) === String(expected);
+  }
+
+  if (typeof actual !== 'object') return false;
+
+  const expectedObj = expected as Record<string, unknown>;
+  const actualObj = actual as Record<string, unknown>;
+
+  for (const key of Object.keys(expectedObj)) {
+    if (!(key in actualObj)) return false;
+    if (!deepPartialMatch(actualObj[key], expectedObj[key])) return false;
+  }
+  return true;
+}
+
+function evaluateAssertions(block: AssertionBlock, context: TestContext | null, skipAll: boolean): AssertionResult[] {
   const results: AssertionResult[] = [];
+  const noSession = context === null;
+  const skipReason = skipAll ? 'Skipped due to prior failure' : 'No recorded session available for replay';
 
   if (block.tool_called !== undefined) {
-    results.push({
-      name: `tool_called: ${block.tool_called}`,
-      status: skipAll ? 'skip' : 'pass', // In dry-run mode, we can't actually verify
-    });
+    const name = `tool_called: ${block.tool_called}`;
+    if (skipAll || noSession) {
+      results.push({ name, status: 'skip', message: skipReason });
+    } else {
+      const found = context.toolsCalled.includes(block.tool_called);
+      results.push({
+        name,
+        status: found ? 'pass' : 'fail',
+        expected: `Tool "${block.tool_called}" to be called`,
+        actual: found ? undefined : `Tools called: [${context.toolsCalled.join(', ')}]`,
+      });
+    }
   }
 
   if (block.tool_args !== undefined) {
     const argsStr = JSON.stringify(block.tool_args);
-    results.push({
-      name: `tool_args: ${truncate(argsStr, 30)}`,
-      status: skipAll ? 'skip' : 'pass',
-    });
+    const name = `tool_args: ${truncate(argsStr, 30)}`;
+    if (skipAll || noSession) {
+      results.push({ name, status: 'skip', message: skipReason });
+    } else {
+      const matched = context.toolArgs.some(args => deepPartialMatch(args, block.tool_args));
+      results.push({
+        name,
+        status: matched ? 'pass' : 'fail',
+        expected: `Tool args matching ${argsStr}`,
+        actual: matched ? undefined : `No tool call matched the expected args`,
+      });
+    }
   }
 
   if (block.response_contains !== undefined) {
-    results.push({
-      name: `response_contains: "${truncate(block.response_contains, 20)}"`,
-      status: skipAll ? 'skip' : 'pass',
-    });
+    const name = `response_contains: "${truncate(block.response_contains, 20)}"`;
+    if (skipAll || noSession) {
+      results.push({ name, status: 'skip', message: skipReason });
+    } else {
+      const found = context.lastResponse.includes(block.response_contains);
+      results.push({
+        name,
+        status: found ? 'pass' : 'fail',
+        expected: `Response to contain "${block.response_contains}"`,
+        actual: found ? undefined : `Response: "${truncate(context.lastResponse, 80)}"`,
+      });
+    }
   }
 
   if (block.response_matches !== undefined) {
-    results.push({
-      name: `response_matches: ${truncate(block.response_matches, 20)}`,
-      status: skipAll ? 'skip' : 'pass',
-    });
+    const name = `response_matches: ${truncate(block.response_matches, 20)}`;
+    if (skipAll || noSession) {
+      results.push({ name, status: 'skip', message: skipReason });
+    } else {
+      let matched = false;
+      let regexError: string | null = null;
+      try {
+        const regex = new RegExp(block.response_matches, 's');
+        matched = regex.test(context.lastResponse);
+      } catch (err) {
+        regexError = (err as Error).message;
+      }
+      if (regexError) {
+        results.push({
+          name,
+          status: 'fail',
+          message: `Invalid regex: ${regexError}`,
+        });
+      } else {
+        results.push({
+          name,
+          status: matched ? 'pass' : 'fail',
+          expected: `Response to match /${block.response_matches}/`,
+          actual: matched ? undefined : `Response: "${truncate(context.lastResponse, 80)}"`,
+        });
+      }
+    }
   }
 
   if (block.cost_under !== undefined) {
-    results.push({
-      name: `cost_under: ${formatCost(block.cost_under)}`,
-      status: skipAll ? 'skip' : 'pass',
-    });
+    const name = `cost_under: ${formatCost(block.cost_under)}`;
+    if (skipAll || noSession) {
+      results.push({ name, status: 'skip', message: skipReason });
+    } else {
+      const under = context.totalCost < block.cost_under;
+      results.push({
+        name,
+        status: under ? 'pass' : 'fail',
+        expected: `Cost < ${formatCost(block.cost_under)}`,
+        actual: under ? undefined : `Cost: ${formatCost(context.totalCost)}`,
+      });
+    }
   }
 
   if (block.duration_under !== undefined) {
-    results.push({
-      name: `duration_under: ${block.duration_under}ms`,
-      status: skipAll ? 'skip' : 'pass',
-    });
+    const name = `duration_under: ${block.duration_under}ms`;
+    if (skipAll || noSession) {
+      results.push({ name, status: 'skip', message: skipReason });
+    } else {
+      const under = context.totalDuration < block.duration_under;
+      results.push({
+        name,
+        status: under ? 'pass' : 'fail',
+        expected: `Duration < ${block.duration_under}ms`,
+        actual: under ? undefined : `Duration: ${context.totalDuration}ms`,
+      });
+    }
   }
 
   if (block.tokens_under !== undefined) {
-    results.push({
-      name: `tokens_under: ${block.tokens_under}`,
-      status: skipAll ? 'skip' : 'pass',
-    });
+    const name = `tokens_under: ${block.tokens_under}`;
+    if (skipAll || noSession) {
+      results.push({ name, status: 'skip', message: skipReason });
+    } else {
+      const under = context.totalTokens < block.tokens_under;
+      results.push({
+        name,
+        status: under ? 'pass' : 'fail',
+        expected: `Tokens < ${block.tokens_under}`,
+        actual: under ? undefined : `Tokens: ${context.totalTokens}`,
+      });
+    }
   }
 
   if (block.memory_updated !== undefined) {
-    results.push({
-      name: 'memory_updated',
-      status: skipAll ? 'skip' : 'pass',
-    });
+    const name = 'memory_updated';
+    if (skipAll || noSession) {
+      results.push({ name, status: 'skip', message: skipReason });
+    } else if (!context.memoryBefore || !context.memoryAfter) {
+      results.push({ name, status: 'skip', message: 'No memory snapshots available' });
+    } else {
+      const changed = JSON.stringify(context.memoryBefore.entries) !== JSON.stringify(context.memoryAfter.entries);
+      const expected = block.memory_updated;
+      const passed = changed === expected;
+      results.push({
+        name,
+        status: passed ? 'pass' : 'fail',
+        expected: expected ? 'Memory to be updated' : 'Memory to be unchanged',
+        actual: passed ? undefined : (changed ? 'Memory was updated' : 'Memory was not updated'),
+      });
+    }
   }
 
   if (block.memory_contains !== undefined) {
-    results.push({
-      name: `memory_contains: "${truncate(block.memory_contains, 20)}"`,
-      status: skipAll ? 'skip' : 'pass',
-    });
+    const name = `memory_contains: "${truncate(block.memory_contains, 20)}"`;
+    if (skipAll || noSession) {
+      results.push({ name, status: 'skip', message: skipReason });
+    } else if (!context.memoryAfter) {
+      results.push({ name, status: 'skip', message: 'No memory snapshot available' });
+    } else {
+      const found = context.memoryAfter.entries.some(
+        entry => entry.content.includes(block.memory_contains!) || entry.title.includes(block.memory_contains!)
+      );
+      results.push({
+        name,
+        status: found ? 'pass' : 'fail',
+        expected: `Memory to contain "${block.memory_contains}"`,
+        actual: found ? undefined : `No memory entry matched`,
+      });
+    }
+  }
+
+  if (block.custom !== undefined) {
+    const name = `custom: ${truncate(block.custom, 30)}`;
+    if (skipAll || noSession) {
+      results.push({ name, status: 'skip', message: skipReason });
+    } else {
+      try {
+        // Evaluate expression with context variables available
+        const fn = new Function(
+          'ctx',
+          'spans', 'toolsCalled', 'toolArgs', 'lastResponse',
+          'totalCost', 'totalTokens', 'totalDuration',
+          `return (${block.custom});`
+        );
+        const result = fn(
+          context,
+          context.spans, context.toolsCalled, context.toolArgs, context.lastResponse,
+          context.totalCost, context.totalTokens, context.totalDuration
+        );
+        results.push({
+          name,
+          status: result ? 'pass' : 'fail',
+          expected: `Expression to be truthy`,
+          actual: result ? undefined : `Expression evaluated to ${JSON.stringify(result)}`,
+        });
+      } catch (err) {
+        results.push({
+          name,
+          status: 'fail',
+          message: `Expression error: ${(err as Error).message}`,
+        });
+      }
+    }
   }
 
   return results;
