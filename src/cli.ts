@@ -13,6 +13,7 @@ import { statsCommand } from './commands/stats';
 import { initCommand } from './commands/init';
 import { configCommand } from './commands/config-cmd';
 import { exportCommand } from './commands/export';
+import { importCommand } from './commands/import';
 
 const program = new Command();
 
@@ -95,6 +96,16 @@ program
   .option('-f, --format <format>', 'Output format (json, markdown, html)', 'json')
   .action((sessionId: string, opts: { format?: string }) => {
     exportCommand(sessionId, opts);
+  });
+
+program
+  .command('import')
+  .description('Import a JSONL session file')
+  .argument('<file>', 'JSONL file to import')
+  .option('-l, --label <label>', 'Session label')
+  .option('-a, --agent <agent>', 'Agent name override')
+  .action((file: string, opts: { label?: string; agent?: string }) => {
+    importCommand(file, opts);
   });
 
 // --- Memory Inspector ---
