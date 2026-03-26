@@ -1,0 +1,1452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens — Chrome DevTools for AI Agents</title>
+  <meta name="description" content="Record, replay, inspect, and test AI agent sessions from your terminal. Open-source CLI. Framework-agnostic. Zero config.">
+  <meta property="og:title" content="AgentLens — Chrome DevTools for AI Agents">
+  <meta property="og:description" content="Record, replay, inspect, and test AI agent sessions from your terminal.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://agentlens.dev">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="AgentLens — Chrome DevTools for AI Agents">
+  <meta name="twitter:description" content="Record, replay, inspect, and test AI agent sessions from your terminal.">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #06060b;
+      --surface: rgba(255, 255, 255, 0.03);
+      --surface-hover: rgba(255, 255, 255, 0.06);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-bright: rgba(255, 255, 255, 0.15);
+      --text: #e2e8f0;
+      --text-dim: #94a3b8;
+      --text-muted: #64748b;
+      --accent: #818cf8;
+      --accent-glow: rgba(129, 140, 248, 0.15);
+      --green: #34d399;
+      --green-glow: rgba(52, 211, 153, 0.15);
+      --amber: #fbbf24;
+      --amber-glow: rgba(251, 191, 36, 0.15);
+      --red: #f87171;
+      --pink: #f472b6;
+      --cyan: #22d3ee;
+      --radius: 16px;
+      --radius-sm: 10px;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Ambient background */
+    .bg-glow {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .bg-glow .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.4;
+    }
+    .bg-glow .orb-1 { width: 600px; height: 600px; background: #312e81; top: -200px; left: -100px; }
+    .bg-glow .orb-2 { width: 500px; height: 500px; background: #064e3b; top: 400px; right: -200px; }
+    .bg-glow .orb-3 { width: 400px; height: 400px; background: #3b0764; bottom: -100px; left: 30%; }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Nav */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      padding: 16px 0;
+      background: rgba(6, 6, 11, 0.8);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+    nav .container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+    .nav-logo-icon {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, var(--accent), var(--cyan));
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+    .nav-logo-text {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 18px;
+      color: var(--text);
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 32px;
+      list-style: none;
+    }
+    .nav-links a {
+      color: var(--text-dim);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text); }
+    .nav-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 20px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+    .nav-cta:hover { background: #6366f1; transform: translateY(-1px); }
+
+    /* Hero */
+    .hero {
+      padding: 160px 0 100px;
+      text-align: center;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      background: var(--accent-glow);
+      border: 1px solid rgba(129, 140, 248, 0.3);
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--accent);
+      margin-bottom: 28px;
+    }
+    .hero-badge .dot {
+      width: 6px; height: 6px;
+      background: var(--green);
+      border-radius: 50%;
+      animation: pulse-dot 2s infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .hero h1 {
+      font-size: clamp(40px, 6vw, 72px);
+      font-weight: 900;
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+      margin-bottom: 24px;
+      background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero h1 span {
+      background: linear-gradient(135deg, var(--accent), var(--cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-sub {
+      font-size: clamp(16px, 2vw, 20px);
+      color: var(--text-dim);
+      max-width: 640px;
+      margin: 0 auto 40px;
+      line-height: 1.7;
+    }
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .hero-install {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 24px;
+      background: var(--surface);
+      border: 1px solid var(--border-bright);
+      border-radius: var(--radius-sm);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 15px;
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .hero-install:hover { border-color: var(--accent); background: var(--accent-glow); }
+    .hero-install .prompt { color: var(--green); }
+    .hero-install .copy-hint { color: var(--text-muted); font-size: 12px; }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 28px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: var(--radius-sm);
+      font-size: 15px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-primary:hover { background: #6366f1; transform: translateY(-1px); box-shadow: 0 8px 30px var(--accent-glow); }
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 28px;
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border-bright);
+      border-radius: var(--radius-sm);
+      font-size: 15px;
+      font-weight: 500;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+    .btn-secondary:hover { border-color: var(--text-dim); background: var(--surface); }
+
+    /* Credential bar */
+    .credentials {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 40px;
+      padding: 24px 0 0;
+      flex-wrap: wrap;
+    }
+    .credentials .stat {
+      text-align: center;
+    }
+    .credentials .stat-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .credentials .stat-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* Terminal demo */
+    .terminal-section {
+      padding: 80px 0;
+    }
+    .terminal {
+      max-width: 800px;
+      margin: 0 auto;
+      background: #0d1117;
+      border-radius: var(--radius);
+      border: 1px solid var(--border-bright);
+      overflow: hidden;
+      box-shadow: 0 25px 80px rgba(0,0,0,0.5);
+    }
+    .terminal-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 20px;
+      background: rgba(255,255,255,0.03);
+      border-bottom: 1px solid var(--border);
+    }
+    .terminal-dot {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+    }
+    .terminal-dot.red { background: #f87171; }
+    .terminal-dot.yellow { background: #fbbf24; }
+    .terminal-dot.green { background: #34d399; }
+    .terminal-title {
+      flex: 1;
+      text-align: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .terminal-body {
+      padding: 24px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      line-height: 1.8;
+      min-height: 320px;
+      position: relative;
+    }
+    .terminal-body .line {
+      opacity: 0;
+      transform: translateY(4px);
+      animation: typeLine 0.3s forwards;
+    }
+    @keyframes typeLine {
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .t-prompt { color: var(--green); }
+    .t-cmd { color: #e2e8f0; }
+    .t-flag { color: var(--amber); }
+    .t-dim { color: #475569; }
+    .t-accent { color: var(--accent); }
+    .t-cyan { color: var(--cyan); }
+    .t-green { color: var(--green); }
+    .t-amber { color: var(--amber); }
+    .t-red { color: var(--red); }
+    .t-pink { color: var(--pink); }
+    .t-bold { font-weight: 600; color: #f8fafc; }
+    .t-icon { margin-right: 4px; }
+
+    /* Section styles */
+    section { padding: 80px 0; }
+    .section-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: clamp(28px, 4vw, 44px);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+    .section-desc {
+      font-size: 17px;
+      color: var(--text-dim);
+      max-width: 600px;
+      line-height: 1.7;
+    }
+
+    /* Feature grid */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-top: 48px;
+    }
+    .feature-card {
+      padding: 32px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: all 0.3s;
+    }
+    .feature-card:hover {
+      border-color: var(--border-bright);
+      background: var(--surface-hover);
+      transform: translateY(-2px);
+    }
+    .feature-icon {
+      width: 48px; height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      margin-bottom: 20px;
+    }
+    .feature-icon.blue { background: var(--accent-glow); border: 1px solid rgba(129, 140, 248, 0.2); }
+    .feature-icon.green { background: var(--green-glow); border: 1px solid rgba(52, 211, 153, 0.2); }
+    .feature-icon.amber { background: var(--amber-glow); border: 1px solid rgba(251, 191, 36, 0.2); }
+    .feature-card h3 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .feature-card p {
+      font-size: 14px;
+      color: var(--text-dim);
+      line-height: 1.6;
+    }
+    .feature-tag {
+      display: inline-block;
+      padding: 3px 10px;
+      background: var(--accent-glow);
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      margin-top: 14px;
+    }
+
+    /* Modules section */
+    .modules {
+      padding: 100px 0;
+    }
+    .module-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: center;
+      margin-bottom: 80px;
+    }
+    .module-row:nth-child(even) .module-content { order: 2; }
+    .module-row:nth-child(even) .module-visual { order: 1; }
+    .module-num {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+    .module-content h3 {
+      font-size: 28px;
+      font-weight: 800;
+      margin-bottom: 12px;
+      letter-spacing: -0.01em;
+    }
+    .module-content p {
+      font-size: 15px;
+      color: var(--text-dim);
+      line-height: 1.7;
+      margin-bottom: 20px;
+    }
+    .module-features {
+      list-style: none;
+    }
+    .module-features li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 6px 0;
+      font-size: 14px;
+      color: var(--text-dim);
+    }
+    .module-features li .check {
+      color: var(--green);
+      font-weight: 700;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .module-visual {
+      background: #0d1117;
+      border: 1px solid var(--border-bright);
+      border-radius: var(--radius);
+      padding: 24px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      line-height: 1.8;
+    }
+
+    /* How it works */
+    .how-steps {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 24px;
+      margin-top: 48px;
+    }
+    .step-card {
+      text-align: center;
+      padding: 32px 20px;
+    }
+    .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px; height: 40px;
+      border-radius: 50%;
+      background: var(--accent-glow);
+      border: 1px solid rgba(129, 140, 248, 0.3);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 16px;
+    }
+    .step-card h4 {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .step-card p {
+      font-size: 13px;
+      color: var(--text-dim);
+      line-height: 1.6;
+    }
+    .step-code {
+      display: block;
+      margin-top: 12px;
+      padding: 8px 14px;
+      background: rgba(0,0,0,0.3);
+      border-radius: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--green);
+    }
+    .step-connector {
+      display: none; /* Hide on mobile, show on desktop via grid */
+    }
+
+    /* Comparison table */
+    .comparison {
+      padding: 100px 0;
+    }
+    .comparison-table {
+      width: 100%;
+      margin-top: 40px;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    .comparison-table th,
+    .comparison-table td {
+      padding: 14px 20px;
+      text-align: center;
+      border-bottom: 1px solid var(--border);
+    }
+    .comparison-table th {
+      font-weight: 600;
+      color: var(--text-muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .comparison-table th:first-child,
+    .comparison-table td:first-child {
+      text-align: left;
+      font-weight: 500;
+    }
+    .comparison-table th.highlight {
+      color: var(--accent);
+      background: var(--accent-glow);
+      border-radius: 8px 8px 0 0;
+    }
+    .comparison-table td.highlight {
+      background: rgba(129, 140, 248, 0.05);
+    }
+    .check-mark { color: var(--green); font-weight: 700; }
+    .cross-mark { color: var(--text-muted); }
+    .partial-mark { color: var(--amber); }
+
+    /* Pricing */
+    .pricing {
+      padding: 100px 0;
+      text-align: center;
+    }
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-top: 48px;
+      max-width: 900px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .price-card {
+      padding: 36px 28px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      text-align: left;
+      transition: all 0.3s;
+    }
+    .price-card:hover { border-color: var(--border-bright); }
+    .price-card.featured {
+      border-color: var(--accent);
+      background: linear-gradient(135deg, rgba(129, 140, 248, 0.08), rgba(34, 211, 238, 0.05));
+      position: relative;
+    }
+    .price-card.featured::before {
+      content: 'Most Popular';
+      position: absolute;
+      top: -12px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 4px 16px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+    .price-tier {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+    .price-amount {
+      font-size: 40px;
+      font-weight: 800;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .price-amount span { font-size: 16px; color: var(--text-dim); font-weight: 400; }
+    .price-desc {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+    .price-features {
+      list-style: none;
+      margin-bottom: 24px;
+    }
+    .price-features li {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 5px 0;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+    .price-features li .check { color: var(--green); flex-shrink: 0; }
+    .price-btn {
+      display: block;
+      width: 100%;
+      padding: 12px;
+      text-align: center;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+    .price-btn.primary { background: var(--accent); color: #fff; }
+    .price-btn.primary:hover { background: #6366f1; }
+    .price-btn.outline { border: 1px solid var(--border-bright); color: var(--text); background: transparent; }
+    .price-btn.outline:hover { background: var(--surface); }
+
+    /* Differentiators */
+    .diff-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 20px;
+      margin-top: 48px;
+    }
+    .diff-card {
+      display: flex;
+      gap: 16px;
+      padding: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+    .diff-icon {
+      font-size: 24px;
+      flex-shrink: 0;
+      width: 40px;
+      text-align: center;
+    }
+    .diff-card h4 { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+    .diff-card p { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+
+    /* CTA section */
+    .cta-section {
+      padding: 100px 0;
+      text-align: center;
+    }
+    .cta-box {
+      max-width: 700px;
+      margin: 0 auto;
+      padding: 60px 48px;
+      background: linear-gradient(135deg, rgba(129, 140, 248, 0.08), rgba(34, 211, 238, 0.05));
+      border: 1px solid rgba(129, 140, 248, 0.2);
+      border-radius: 24px;
+    }
+    .cta-box h2 {
+      font-size: clamp(24px, 3vw, 36px);
+      font-weight: 800;
+      margin-bottom: 12px;
+    }
+    .cta-box p {
+      font-size: 16px;
+      color: var(--text-dim);
+      margin-bottom: 28px;
+    }
+    .cta-install {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 32px;
+      background: #0d1117;
+      border: 1px solid var(--border-bright);
+      border-radius: var(--radius-sm);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 16px;
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .cta-install:hover { border-color: var(--accent); }
+
+    /* Footer */
+    footer {
+      padding: 40px 0;
+      border-top: 1px solid var(--border);
+      text-align: center;
+    }
+    footer .container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .footer-brand {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      color: var(--text-dim);
+    }
+    .footer-links {
+      display: flex;
+      gap: 24px;
+      list-style: none;
+    }
+    .footer-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 13px;
+      transition: color 0.2s;
+    }
+    .footer-links a:hover { color: var(--text); }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .features-grid { grid-template-columns: 1fr; }
+      .module-row { grid-template-columns: 1fr; gap: 32px; }
+      .module-row:nth-child(even) .module-content { order: 1; }
+      .module-row:nth-child(even) .module-visual { order: 2; }
+      .how-steps { grid-template-columns: repeat(2, 1fr); }
+      .pricing-grid { grid-template-columns: 1fr; max-width: 400px; }
+      .diff-grid { grid-template-columns: 1fr; }
+      .comparison-table { font-size: 12px; }
+      .comparison-table th, .comparison-table td { padding: 10px 8px; }
+      .nav-links { display: none; }
+      footer .container { flex-direction: column; gap: 16px; }
+    }
+    @media (max-width: 600px) {
+      .hero { padding: 130px 0 60px; }
+      .how-steps { grid-template-columns: 1fr; }
+      .hero-actions { flex-direction: column; }
+      .credentials { gap: 24px; }
+    }
+
+    /* Smooth scroll */
+    html { scroll-behavior: smooth; }
+
+    /* Terminal tab system */
+    .terminal-tabs {
+      display: flex;
+      gap: 0;
+      margin-top: 0;
+    }
+    .terminal-tab {
+      padding: 10px 20px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+      background: none;
+      border-top: none;
+      border-left: none;
+      border-right: none;
+    }
+    .terminal-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .terminal-tab:hover { color: var(--text-dim); }
+    .terminal-content {
+      display: none;
+    }
+    .terminal-content.active {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-glow">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <!-- Nav -->
+  <nav>
+    <div class="container">
+      <a href="#" class="nav-logo">
+        <div class="nav-logo-icon">&#x1F50D;</div>
+        <span class="nav-logo-text">AgentLens</span>
+      </a>
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#modules">Modules</a></li>
+        <li><a href="#pricing">Pricing</a></li>
+        <li><a href="https://github.com/zzhiyuann/agentlens">GitHub</a></li>
+      </ul>
+      <a href="https://github.com/zzhiyuann/agentlens" class="nav-cta">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        Star on GitHub
+      </a>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-badge">
+        <span class="dot"></span>
+        Open Source &mdash; Free Forever
+      </div>
+      <h1>Chrome DevTools<br>for <span>AI Agents</span></h1>
+      <p class="hero-sub">
+        Record, replay, inspect, and test AI agent sessions from your terminal.
+        See exactly what your agent thinks, decides, and does &mdash; step by step.
+      </p>
+      <div class="hero-actions">
+        <div class="hero-install" onclick="copyInstall()" id="installCmd">
+          <span class="prompt">$</span>
+          <span>npm install -g agentlens</span>
+          <span class="copy-hint">click to copy</span>
+        </div>
+        <a href="https://github.com/zzhiyuann/agentlens" class="btn-secondary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          View on GitHub
+        </a>
+      </div>
+      <div class="credentials">
+        <div class="stat">
+          <div class="stat-value">3</div>
+          <div class="stat-label">Modules</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value">0</div>
+          <div class="stat-label">Config Required</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value">&infin;</div>
+          <div class="stat-label">Frameworks</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value">MIT</div>
+          <div class="stat-label">License</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Terminal Demo -->
+  <section class="terminal-section">
+    <div class="container">
+      <div class="terminal">
+        <div class="terminal-header">
+          <div class="terminal-dot red"></div>
+          <div class="terminal-dot yellow"></div>
+          <div class="terminal-dot green"></div>
+          <span class="terminal-title">agentlens &mdash; session replay</span>
+        </div>
+        <div class="terminal-tabs" style="padding: 0 24px; border-bottom: 1px solid var(--border);">
+          <button class="terminal-tab active" data-tab="record">record</button>
+          <button class="terminal-tab" data-tab="replay">replay</button>
+          <button class="terminal-tab" data-tab="memory">memory</button>
+          <button class="terminal-tab" data-tab="test">test</button>
+        </div>
+        <div class="terminal-body">
+          <!-- Record tab -->
+          <div class="terminal-content active" id="tab-record">
+            <div class="line" style="animation-delay: 0.1s"><span class="t-prompt">$</span> <span class="t-cmd">alens record</span> <span class="t-flag">--label</span> <span class="t-cmd">"refactor-auth"</span> <span class="t-dim">claude "Refactor auth to JWT"</span></div>
+            <div class="line" style="animation-delay: 0.3s"><br></div>
+            <div class="line" style="animation-delay: 0.5s"><span class="t-accent">&#9679;</span> <span class="t-bold">Recording session...</span></div>
+            <div class="line" style="animation-delay: 0.7s"><span class="t-dim">  Label: refactor-auth</span></div>
+            <div class="line" style="animation-delay: 0.9s"><span class="t-dim">  Session ID: ses_a1b2c3d4</span></div>
+            <div class="line" style="animation-delay: 1.1s"><br></div>
+            <div class="line" style="animation-delay: 1.3s"><span class="t-dim">  [Claude Code output streams through normally...]</span></div>
+            <div class="line" style="animation-delay: 1.5s"><br></div>
+            <div class="line" style="animation-delay: 2.0s"><span class="t-green">&#10004;</span> <span class="t-bold">Session recorded: ses_a1b2c3d4</span></div>
+            <div class="line" style="animation-delay: 2.2s"><span class="t-dim">  Duration:</span> 4m 32s</div>
+            <div class="line" style="animation-delay: 2.4s"><span class="t-dim">  LLM calls:</span> 12 <span class="t-dim">&nbsp;|&nbsp; Tool calls:</span> 28</div>
+            <div class="line" style="animation-delay: 2.6s"><span class="t-dim">  Tokens:</span> 45,230 <span class="t-dim">&nbsp;|&nbsp; Cost:</span> <span class="t-amber">$0.47</span></div>
+          </div>
+
+          <!-- Replay tab -->
+          <div class="terminal-content" id="tab-replay">
+            <div class="line" style="animation-delay: 0.1s"><span class="t-prompt">$</span> <span class="t-cmd">alens replay ses_a1b2c3d4</span></div>
+            <div class="line" style="animation-delay: 0.3s"><br></div>
+            <div class="line" style="animation-delay: 0.5s"><span class="t-accent">&#9654;</span> <span class="t-bold">Replaying: refactor-auth</span> <span class="t-dim">&nbsp;Step 3/12 &nbsp;| &nbsp;14:30:26</span></div>
+            <div class="line" style="animation-delay: 0.7s"><br></div>
+            <div class="line" style="animation-delay: 0.9s"><span class="t-cyan">Prompt</span> <span class="t-dim">(2,340 tokens)</span></div>
+            <div class="line" style="animation-delay: 1.0s"><span class="t-dim">&#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;</span></div>
+            <div class="line" style="animation-delay: 1.1s"><span class="t-dim">&#9474;</span> <span class="t-pink">System:</span> You are a helpful assistant...&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="t-dim">&#9474;</span></div>
+            <div class="line" style="animation-delay: 1.2s"><span class="t-dim">&#9474;</span> <span class="t-green">User:</span> Refactor auth middleware to use JWT&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="t-dim">&#9474;</span></div>
+            <div class="line" style="animation-delay: 1.3s"><span class="t-dim">&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</span></div>
+            <div class="line" style="animation-delay: 1.5s"><br></div>
+            <div class="line" style="animation-delay: 1.6s"><span class="t-dim">Cost so far:</span> <span class="t-amber">$0.08</span> <span class="t-dim">/ $0.47 total</span></div>
+            <div class="line" style="animation-delay: 1.8s"><br></div>
+            <div class="line" style="animation-delay: 2.0s"><span class="t-dim">[n]ext &nbsp;[p]rev &nbsp;[j]ump # &nbsp;[e]xpand &nbsp;[c]ost &nbsp;[q]uit</span></div>
+          </div>
+
+          <!-- Memory tab -->
+          <div class="terminal-content" id="tab-memory">
+            <div class="line" style="animation-delay: 0.1s"><span class="t-prompt">$</span> <span class="t-cmd">alens memory show</span> <span class="t-dim">~/.aos/agents/cto/memory/</span></div>
+            <div class="line" style="animation-delay: 0.3s"><br></div>
+            <div class="line" style="animation-delay: 0.5s"><span class="t-accent">&#128065;</span> <span class="t-bold">Memory: cto</span> <span class="t-dim">(8 files, 12.4 KB)</span></div>
+            <div class="line" style="animation-delay: 0.7s"><br></div>
+            <div class="line" style="animation-delay: 0.8s"><span class="t-dim">  File &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Size &nbsp;&nbsp;&nbsp;Modified &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Status</span></div>
+            <div class="line" style="animation-delay: 0.9s">  codebase-patterns.md &nbsp;&nbsp;&nbsp;&nbsp;2.1K &nbsp;&nbsp;&nbsp;2 hours ago &nbsp;&nbsp;<span class="t-green">Fresh</span></div>
+            <div class="line" style="animation-delay: 1.0s">  debugging-insights.md &nbsp;&nbsp;&nbsp;1.8K &nbsp;&nbsp;&nbsp;yesterday &nbsp;&nbsp;&nbsp;&nbsp;<span class="t-green">Fresh</span></div>
+            <div class="line" style="animation-delay: 1.1s">  architecture-decisions.md 3.2K &nbsp;&nbsp;&nbsp;3 days ago &nbsp;&nbsp;&nbsp;<span class="t-amber">Active</span></div>
+            <div class="line" style="animation-delay: 1.2s">  <span class="t-dim">team-preferences.md &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0.9K &nbsp;&nbsp;&nbsp;1 week ago &nbsp;&nbsp;&nbsp;Stale</span></div>
+            <div class="line" style="animation-delay: 1.3s">  <span class="t-dim">legacy-migration.md &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;1.0K &nbsp;&nbsp;&nbsp;2 months ago &nbsp;Stale</span></div>
+            <div class="line" style="animation-delay: 1.5s"><br></div>
+            <div class="line" style="animation-delay: 1.6s"><span class="t-bold">Health Score:</span> <span class="t-amber">62/100</span></div>
+            <div class="line" style="animation-delay: 1.8s"><span class="t-dim">  3 stale files | 1 orphaned entry | 1 potential duplicate</span></div>
+          </div>
+
+          <!-- Test tab -->
+          <div class="terminal-content" id="tab-test">
+            <div class="line" style="animation-delay: 0.1s"><span class="t-prompt">$</span> <span class="t-cmd">alens test run</span> <span class="t-dim">tests/customer-support.yaml</span></div>
+            <div class="line" style="animation-delay: 0.3s"><br></div>
+            <div class="line" style="animation-delay: 0.5s"><span class="t-accent">&#9654;</span> <span class="t-bold">Running: customer-support.yaml</span></div>
+            <div class="line" style="animation-delay: 0.7s"><br></div>
+            <div class="line" style="animation-delay: 0.9s"><span class="t-dim">  Step 1/4</span> User: "I want a refund for order #12345"</div>
+            <div class="line" style="animation-delay: 1.1s">  &nbsp;&nbsp;Assert tool_called: lookup_order <span class="t-dim">............</span> <span class="t-green">PASS</span></div>
+            <div class="line" style="animation-delay: 1.3s">  &nbsp;&nbsp;Assert tool_args.order_id: "12345" <span class="t-dim">........</span> <span class="t-green">PASS</span></div>
+            <div class="line" style="animation-delay: 1.5s"><br></div>
+            <div class="line" style="animation-delay: 1.7s"><span class="t-dim">  Step 2/4</span> Mock: lookup_order &#8594; delivered, $49.99</div>
+            <div class="line" style="animation-delay: 1.9s">  &nbsp;&nbsp;Assert response_contains: "refund" <span class="t-dim">........</span> <span class="t-green">PASS</span></div>
+            <div class="line" style="animation-delay: 2.1s">  &nbsp;&nbsp;Assert cost_under: 0.05 <span class="t-dim">....................</span> <span class="t-green">PASS</span> <span class="t-dim">($0.03)</span></div>
+            <div class="line" style="animation-delay: 2.3s"><br></div>
+            <div class="line" style="animation-delay: 2.5s"><span class="t-green">&#10004; PASS</span> <span class="t-bold">customer-support.yaml</span> <span class="t-dim">(7/7, 1.8s, $0.03)</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features">
+    <div class="container">
+      <div class="section-label">Features</div>
+      <h2 class="section-title">Everything you need to debug AI agents</h2>
+      <p class="section-desc">
+        Three modules, one CLI. No dashboards to deploy, no accounts to create, no config to write. Install and start debugging.
+      </p>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon blue">&#9654;</div>
+          <h3>Session Recording</h3>
+          <p>Capture every LLM call, tool invocation, and response in a structured trace. Zero overhead &mdash; your agent runs normally.</p>
+          <span class="feature-tag">Session Debugger</span>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon blue">&#9664;&#9654;</div>
+          <h3>Step-Through Replay</h3>
+          <p>Navigate forward and backward through agent decisions. See the full prompt, response, token count, and cost at every step.</p>
+          <span class="feature-tag">Session Debugger</span>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon blue">&#36;</div>
+          <h3>Cost Breakdown</h3>
+          <p>Token usage and estimated cost per step, per session, per agent. Know exactly where your money goes.</p>
+          <span class="feature-tag">Session Debugger</span>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon green">&#128065;</div>
+          <h3>Memory Inspection</h3>
+          <p>Visualize agent memory state &mdash; what's fresh, what's stale, what's orphaned. Framework-agnostic.</p>
+          <span class="feature-tag">Memory Inspector</span>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon green">&#8800;</div>
+          <h3>Memory Diff</h3>
+          <p>See exactly how memory changed between sessions or git commits. Added, modified, deleted &mdash; all tracked.</p>
+          <span class="feature-tag">Memory Inspector</span>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon green">&#128154;</div>
+          <h3>Memory Health</h3>
+          <p>Automated health scoring with actionable recommendations. Find stale, duplicate, and orphaned memory entries.</p>
+          <span class="feature-tag">Memory Inspector</span>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon amber">&#9881;</div>
+          <h3>YAML Test Scenarios</h3>
+          <p>Define multi-agent test scenarios in YAML. Mock tools, assert on outputs, check costs &mdash; like pytest for agents.</p>
+          <span class="feature-tag">Test Harness</span>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon amber">&#128260;</div>
+          <h3>Deterministic Replay</h3>
+          <p>Use recorded sessions as test fixtures. Run them as regression tests to catch behavior changes across code versions.</p>
+          <span class="feature-tag">Test Harness</span>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon amber">&#9166;</div>
+          <h3>CI-Friendly</h3>
+          <p>Exit code 0 on pass, 1 on fail. Structured output. Run in GitHub Actions, GitLab CI, or any pipeline.</p>
+          <span class="feature-tag">Test Harness</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Modules deep dive -->
+  <section id="modules" class="modules">
+    <div class="container">
+      <div class="section-label">Modules</div>
+      <h2 class="section-title">Three tools. One mission.</h2>
+      <p class="section-desc" style="margin-bottom: 60px;">
+        Each module works standalone. Together, they give you complete visibility into what your agents do and why.
+      </p>
+
+      <!-- Session Debugger -->
+      <div class="module-row">
+        <div class="module-content">
+          <div class="module-num">Module 01</div>
+          <h3>Session Debugger</h3>
+          <p>Record agent sessions transparently, then replay them step by step. See the full prompt, the model's reasoning, every tool call, and the cost of each decision.</p>
+          <ul class="module-features">
+            <li><span class="check">&#10003;</span> Zero-config recording via hooks</li>
+            <li><span class="check">&#10003;</span> Interactive step-through with keyboard controls</li>
+            <li><span class="check">&#10003;</span> Full prompt/response inspection</li>
+            <li><span class="check">&#10003;</span> Per-step cost and token tracking</li>
+            <li><span class="check">&#10003;</span> Session diff &mdash; compare two runs side by side</li>
+            <li><span class="check">&#10003;</span> Export to JSON, HTML, or Markdown</li>
+          </ul>
+        </div>
+        <div class="module-visual">
+          <div><span class="t-prompt">$</span> <span class="t-cmd">alens inspect ses_a1b2c3</span></div>
+          <br>
+          <div><span class="t-green">&#10004;</span> <span class="t-bold">Session: refactor-auth</span></div>
+          <div><span class="t-dim">  4m 32s | 12 LLM calls | 28 tools | $0.47</span></div>
+          <br>
+          <div><span class="t-bold">Timeline</span></div>
+          <div><span class="t-dim">14:30:22</span> <span class="t-accent">LLM</span>&nbsp; Initial prompt &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="t-amber">$0.03</span></div>
+          <div><span class="t-dim">14:30:25</span> <span class="t-green">TOOL</span> Read middleware.ts &nbsp;&nbsp;&nbsp;<span class="t-dim">&mdash;</span></div>
+          <div><span class="t-dim">14:30:26</span> <span class="t-accent">LLM</span>&nbsp; Analysis + plan &nbsp;&nbsp;&nbsp;&nbsp;<span class="t-amber">$0.06</span></div>
+          <div><span class="t-dim">14:30:30</span> <span class="t-green">TOOL</span> Edit middleware.ts &nbsp;&nbsp;<span class="t-dim">&mdash;</span></div>
+          <div><span class="t-dim">14:30:31</span> <span class="t-green">TOOL</span> Edit session.ts &nbsp;&nbsp;&nbsp;&nbsp;<span class="t-dim">&mdash;</span></div>
+          <div><span class="t-dim">14:30:32</span> <span class="t-accent">LLM</span>&nbsp; Verify changes &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="t-amber">$0.02</span></div>
+          <div><span class="t-dim">14:30:35</span> <span class="t-green">TOOL</span> Bash: npm test &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="t-dim">&mdash;</span></div>
+        </div>
+      </div>
+
+      <!-- Memory Inspector -->
+      <div class="module-row">
+        <div class="module-content">
+          <div class="module-num">Module 02</div>
+          <h3>Memory Inspector</h3>
+          <p>Agent memory is the most underserved category in AI tooling. See how memory evolves, find stale entries, detect duplicates, and track what each agent knows over time.</p>
+          <ul class="module-features">
+            <li><span class="check">&#10003;</span> Memory state visualization with health scoring</li>
+            <li><span class="check">&#10003;</span> Diff between git commits or dates</li>
+            <li><span class="check">&#10003;</span> Timeline view of memory evolution</li>
+            <li><span class="check">&#10003;</span> Detect stale, orphaned, and duplicate entries</li>
+            <li><span class="check">&#10003;</span> Framework-agnostic &mdash; works with any memory format</li>
+            <li><span class="check">&#10003;</span> Actionable health recommendations</li>
+          </ul>
+        </div>
+        <div class="module-visual">
+          <div><span class="t-prompt">$</span> <span class="t-cmd">alens memory health</span> <span class="t-dim">./memory/</span></div>
+          <br>
+          <div><span class="t-bold">Health Score:</span> <span class="t-amber">62/100</span></div>
+          <br>
+          <div><span class="t-amber">STALE</span>&nbsp; 3 files &gt; 2 weeks old</div>
+          <div><span class="t-dim">&nbsp;&nbsp;team-preferences.md (1w)</span></div>
+          <div><span class="t-dim">&nbsp;&nbsp;deployment-notes.md (3w)</span></div>
+          <br>
+          <div><span class="t-red">ORPHAN</span> legacy-migration.md</div>
+          <div><span class="t-dim">&nbsp;&nbsp;Not in MEMORY.md index</span></div>
+          <br>
+          <div><span class="t-amber">DUPE</span>&nbsp;&nbsp; 34% overlap detected</div>
+          <div><span class="t-dim">&nbsp;&nbsp;codebase-patterns &#8776; api-patterns</span></div>
+        </div>
+      </div>
+
+      <!-- Test Harness -->
+      <div class="module-row">
+        <div class="module-content">
+          <div class="module-num">Module 03</div>
+          <h3>Multi-Agent Test Harness</h3>
+          <p>Pytest for AI agents. Define scenarios in YAML, mock tools, assert on outputs and costs, run as regression tests. No more "just run it and check manually."</p>
+          <ul class="module-features">
+            <li><span class="check">&#10003;</span> YAML scenario definitions</li>
+            <li><span class="check">&#10003;</span> Mock specific tools or agent responses</li>
+            <li><span class="check">&#10003;</span> Assert on tool calls, outputs, memory, and cost</li>
+            <li><span class="check">&#10003;</span> Use recorded sessions as test fixtures</li>
+            <li><span class="check">&#10003;</span> Regression detection across code versions</li>
+            <li><span class="check">&#10003;</span> CI-friendly exit codes and structured output</li>
+          </ul>
+        </div>
+        <div class="module-visual">
+          <div><span class="t-dim"># tests/customer-support.yaml</span></div>
+          <div><span class="t-pink">name</span>: <span class="t-cmd">"Customer refund flow"</span></div>
+          <div><span class="t-pink">agents</span>:</div>
+          <div>&nbsp;&nbsp;- <span class="t-cyan">role</span>: support-agent</div>
+          <div>&nbsp;&nbsp;&nbsp;&nbsp;<span class="t-cyan">model</span>: claude-sonnet-4-6</div>
+          <div><span class="t-pink">scenario</span>:</div>
+          <div>&nbsp;&nbsp;- <span class="t-cyan">user</span>: <span class="t-cmd">"Refund order #12345"</span></div>
+          <div>&nbsp;&nbsp;- <span class="t-cyan">assert</span>:</div>
+          <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="t-amber">tool_called</span>: lookup_order</div>
+          <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="t-amber">cost_under</span>: 0.05</div>
+          <div>&nbsp;&nbsp;- <span class="t-cyan">mock_tool_response</span>:</div>
+          <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="t-amber">lookup_order</span>: { <span class="t-cyan">status</span>: delivered }</div>
+          <div>&nbsp;&nbsp;- <span class="t-cyan">assert</span>:</div>
+          <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="t-amber">response_contains</span>: <span class="t-cmd">"refund"</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section>
+    <div class="container">
+      <div class="section-label" style="text-align: center;">How It Works</div>
+      <h2 class="section-title" style="text-align: center;">Debug in 60 seconds</h2>
+      <div class="how-steps">
+        <div class="step-card">
+          <div class="step-num">1</div>
+          <h4>Install</h4>
+          <p>One command. No accounts, no config, no dashboards.</p>
+          <code class="step-code">npm i -g agentlens</code>
+        </div>
+        <div class="step-card">
+          <div class="step-num">2</div>
+          <h4>Record</h4>
+          <p>Wrap your agent command. It runs normally &mdash; recording is transparent.</p>
+          <code class="step-code">alens record claude "task"</code>
+        </div>
+        <div class="step-card">
+          <div class="step-num">3</div>
+          <h4>Replay</h4>
+          <p>Step through every decision. See prompts, responses, tool calls, and costs.</p>
+          <code class="step-code">alens replay ses_abc123</code>
+        </div>
+        <div class="step-card">
+          <div class="step-num">4</div>
+          <h4>Test</h4>
+          <p>Write YAML scenarios. Assert on behavior. Run as regression tests.</p>
+          <code class="step-code">alens test run flow.yaml</code>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Comparison -->
+  <section class="comparison" id="compare">
+    <div class="container">
+      <div class="section-label" style="text-align: center;">Comparison</div>
+      <h2 class="section-title" style="text-align: center;">Built different</h2>
+      <p class="section-desc" style="text-align: center; margin: 0 auto 8px;">
+        Not another observability dashboard. The debugging toolkit agents deserve.
+      </p>
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th class="highlight">AgentLens</th>
+            <th>LangSmith</th>
+            <th>Langfuse</th>
+            <th>AgentOps</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Step-through replay</td>
+            <td class="highlight"><span class="check-mark">&#10003;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+            <td><span class="partial-mark">~</span></td>
+          </tr>
+          <tr>
+            <td>Memory inspection</td>
+            <td class="highlight"><span class="check-mark">&#10003;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+          </tr>
+          <tr>
+            <td>Memory diff &amp; timeline</td>
+            <td class="highlight"><span class="check-mark">&#10003;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+          </tr>
+          <tr>
+            <td>Test harness (YAML)</td>
+            <td class="highlight"><span class="check-mark">&#10003;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+          </tr>
+          <tr>
+            <td>Framework-agnostic</td>
+            <td class="highlight"><span class="check-mark">&#10003;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+            <td><span class="check-mark">&#10003;</span></td>
+            <td><span class="check-mark">&#10003;</span></td>
+          </tr>
+          <tr>
+            <td>Open-source CLI</td>
+            <td class="highlight"><span class="check-mark">&#10003;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+            <td><span class="check-mark">&#10003;</span></td>
+            <td><span class="partial-mark">~</span></td>
+          </tr>
+          <tr>
+            <td>CLI-first (no browser)</td>
+            <td class="highlight"><span class="check-mark">&#10003;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+          </tr>
+          <tr>
+            <td>Zero config</td>
+            <td class="highlight"><span class="check-mark">&#10003;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+            <td><span class="partial-mark">~</span></td>
+          </tr>
+          <tr>
+            <td>Self-hosted</td>
+            <td class="highlight"><span class="check-mark">&#10003;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+            <td><span class="check-mark">&#10003;</span></td>
+            <td><span class="cross-mark">&mdash;</span></td>
+          </tr>
+          <tr>
+            <td>Cost per step</td>
+            <td class="highlight"><span class="check-mark">&#10003;</span></td>
+            <td><span class="check-mark">&#10003;</span></td>
+            <td><span class="check-mark">&#10003;</span></td>
+            <td><span class="check-mark">&#10003;</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Why different -->
+  <section>
+    <div class="container">
+      <div class="section-label" style="text-align: center;">Why AgentLens</div>
+      <h2 class="section-title" style="text-align: center;">Built by agent builders, for agent builders</h2>
+      <div class="diff-grid">
+        <div class="diff-card">
+          <div class="diff-icon">&#128736;</div>
+          <div>
+            <h4>Production, not theory</h4>
+            <p>Built by a team that runs 6 persistent AI agents in production. Every feature solves a real debugging problem we hit ourselves.</p>
+          </div>
+        </div>
+        <div class="diff-card">
+          <div class="diff-icon">&#9000;</div>
+          <div>
+            <h4>CLI, not dashboards</h4>
+            <p>Developers live in terminals. No browser tabs, no sign-ups, no waiting for a web page to load. Everything runs locally.</p>
+          </div>
+        </div>
+        <div class="diff-card">
+          <div class="diff-icon">&#128268;</div>
+          <div>
+            <h4>Framework-agnostic</h4>
+            <p>Works with Claude Code, OpenAI Agents SDK, CrewAI, LangGraph, or your custom framework. Adapter-based architecture.</p>
+          </div>
+        </div>
+        <div class="diff-card">
+          <div class="diff-icon">&#128300;</div>
+          <div>
+            <h4>Research depth</h4>
+            <p>Memory health scoring, behavior regression detection, and test assertions grounded in agent research &mdash; not just log viewers.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section class="pricing" id="pricing">
+    <div class="container">
+      <div class="section-label">Pricing</div>
+      <h2 class="section-title">Free to start. Pay when you need more.</h2>
+      <p class="section-desc" style="text-align: center; margin: 0 auto;">
+        The full CLI is free and open source. Cloud features for teams that need sharing, storage, and dashboards.
+      </p>
+      <div class="pricing-grid">
+        <div class="price-card">
+          <div class="price-tier">Community</div>
+          <div class="price-amount">$0 <span>/ forever</span></div>
+          <p class="price-desc">Everything you need to debug agents locally.</p>
+          <ul class="price-features">
+            <li><span class="check">&#10003;</span> Session recording &amp; replay</li>
+            <li><span class="check">&#10003;</span> Memory inspector &amp; health</li>
+            <li><span class="check">&#10003;</span> Test harness (YAML)</li>
+            <li><span class="check">&#10003;</span> Claude Code adapter</li>
+            <li><span class="check">&#10003;</span> Local SQLite storage</li>
+            <li><span class="check">&#10003;</span> JSON/HTML/MD export</li>
+            <li><span class="check">&#10003;</span> MIT license</li>
+          </ul>
+          <a href="#" class="price-btn outline" onclick="copyInstall(); return false;">Install Free</a>
+        </div>
+        <div class="price-card featured">
+          <div class="price-tier">Pro</div>
+          <div class="price-amount">$49 <span>/ month</span></div>
+          <p class="price-desc">Cloud storage, web dashboard, and team features.</p>
+          <ul class="price-features">
+            <li><span class="check">&#10003;</span> Everything in Community</li>
+            <li><span class="check">&#10003;</span> Cloud trace storage</li>
+            <li><span class="check">&#10003;</span> Web dashboard</li>
+            <li><span class="check">&#10003;</span> Team sharing</li>
+            <li><span class="check">&#10003;</span> All framework adapters</li>
+            <li><span class="check">&#10003;</span> Advanced search</li>
+            <li><span class="check">&#10003;</span> 90-day retention</li>
+          </ul>
+          <a href="#" class="price-btn primary">Join Waitlist</a>
+        </div>
+        <div class="price-card">
+          <div class="price-tier">Team</div>
+          <div class="price-amount">$99 <span>/ seat / mo</span></div>
+          <p class="price-desc">For scaling teams that need governance and CI.</p>
+          <ul class="price-features">
+            <li><span class="check">&#10003;</span> Everything in Pro</li>
+            <li><span class="check">&#10003;</span> SSO &amp; audit logs</li>
+            <li><span class="check">&#10003;</span> CI/CD integration</li>
+            <li><span class="check">&#10003;</span> Unlimited retention</li>
+            <li><span class="check">&#10003;</span> Priority support</li>
+            <li><span class="check">&#10003;</span> Custom adapters</li>
+          </ul>
+          <a href="#" class="price-btn outline">Contact Us</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Bottom CTA -->
+  <section class="cta-section">
+    <div class="container">
+      <div class="cta-box">
+        <h2>Stop debugging agents with print()</h2>
+        <p>Install AgentLens in 10 seconds. Record your first session. See what your agent actually thinks.</p>
+        <div class="cta-install" onclick="copyInstall()">
+          <span class="t-prompt">$</span>
+          <span>npm install -g agentlens</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div class="footer-brand">AgentLens &mdash; by RyanHub</div>
+      <ul class="footer-links">
+        <li><a href="https://github.com/zzhiyuann/agentlens">GitHub</a></li>
+        <li><a href="https://github.com/zzhiyuann/agentlens/issues">Issues</a></li>
+        <li><a href="https://x.com/AltRyan1">Twitter</a></li>
+        <li><a href="https://ryanwang.dev">ryanwang.dev</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <script>
+    // Copy install command
+    function copyInstall() {
+      navigator.clipboard.writeText('npm install -g agentlens').then(() => {
+        const el = document.getElementById('installCmd');
+        if (el) {
+          const hint = el.querySelector('.copy-hint');
+          if (hint) {
+            hint.textContent = 'copied!';
+            hint.style.color = '#34d399';
+            setTimeout(() => {
+              hint.textContent = 'click to copy';
+              hint.style.color = '';
+            }, 2000);
+          }
+        }
+      });
+    }
+
+    // Terminal tab switching
+    document.querySelectorAll('.terminal-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.terminal-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.terminal-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+
+        // Re-trigger animations
+        const content = document.getElementById('tab-' + tab.dataset.tab);
+        content.querySelectorAll('.line').forEach(line => {
+          line.style.animation = 'none';
+          line.offsetHeight; // Force reflow
+          line.style.animation = '';
+        });
+      });
+    });
+
+    // Smooth scroll for nav links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function(e) {
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          e.preventDefault();
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+    });
+
+    // Intersection Observer for scroll animations
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.style.opacity = '1';
+          entry.target.style.transform = 'translateY(0)';
+        }
+      });
+    }, { threshold: 0.1 });
+
+    document.querySelectorAll('.feature-card, .module-row, .step-card, .diff-card, .price-card').forEach(el => {
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(20px)';
+      el.style.transition = 'opacity 0.5s, transform 0.5s';
+      observer.observe(el);
+    });
+  </script>
+</body>
+</html>
